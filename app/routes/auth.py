@@ -5,6 +5,7 @@ from app import db, bcrypt
 from app.models.user import User, Role, AuditLog
 import secrets, re
 from datetime import datetime, timedelta
+from app.utils.email import send_reset_email
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -61,8 +62,9 @@ def login():
     if not user.is_active:
         return jsonify({"error": "Cuenta desactivada"}), 403
 
-    access_token  = create_access_token(identity=user.id)
-    refresh_token = create_refresh_token(identity=user.id)
+    access_token  = create_access_token(identity=str(user.id))
+    refresh_token = create_refresh_token(identity=str(user.id))
+    
     log_action(user.id, "LOGIN", "auth", "Inicio de sesión exitoso")
 
     return jsonify({
@@ -75,32 +77,49 @@ def login():
 @jwt_required(refresh=True)
 def refresh():
     identity     = get_jwt_identity()
-    access_token = create_access_token(identity=identity)
+    access_token = create_access_token(identity=str(identity))
     return jsonify({"access_token": access_token}), 200
 
 @auth_bp.route("/forgot-password", methods=["POST"])
 def forgot_password():
     data  = request.get_json()
-    email = data.get("email")
-    user  = User.query.filter_by(email=email).first()
+    email = data.get("email", "").strip().lower()
 
-    # Siempre responder 200 para no revelar si el email existe
+    if not email:
+        return jsonify({"error": "Email requerido"}), 400
+
+    user = User.query.filter_by(email=email).first()
+
     if user:
+        # Generar token seguro
         token   = secrets.token_urlsafe(32)
         expires = datetime.utcnow() + timedelta(hours=1)
+
         user.reset_token         = token
         user.reset_token_expires = expires
         db.session.commit()
 
-        # En producción enviar email; aquí lo devolvemos en respuesta (solo dev)
         reset_url = f"{current_app.config['FRONTEND_URL']}/reset-password?token={token}"
-        log_action(user.id, "PASSWORD_RESET_REQUEST", "auth")
-        # TODO: flask_mail.send_message(...)
-        # Por ahora devolvemos el link en dev:
-        return jsonify({"message": "Si el email existe recibirás un enlace",
-                        "dev_reset_url": reset_url}), 200
 
-    return jsonify({"message": "Si el email existe recibirás un enlace"}), 200
+        # Enviar correo real
+        sent = send_reset_email(
+            to_email=user.email,
+            username=user.username,
+            reset_url=reset_url
+        )
+
+        log_action(user.id, "PASSWORD_RESET_REQUEST", "auth",
+                   f"Correo {'enviado' if sent else 'FALLO'} a {user.email}")
+
+        if not sent:
+            return jsonify({
+                "error": "No se pudo enviar el correo. Verifica la configuración SMTP."
+            }), 500
+
+    # Siempre responder igual para no revelar si el email existe
+    return jsonify({
+        "message": "Si el email está registrado, recibirás un enlace en tu correo."
+    }), 200
 
 @auth_bp.route("/reset-password", methods=["POST"])
 def reset_password():
@@ -127,6 +146,6 @@ def reset_password():
 @auth_bp.route("/me", methods=["GET"])
 @jwt_required()
 def me():
-    user_id = get_jwt_identity()
+    user_id = int(get_jwt_identity())
     user    = User.query.get_or_404(user_id)
     return jsonify(user.to_dict()), 200

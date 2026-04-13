@@ -9,7 +9,7 @@ def role_required(*roles):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             verify_jwt_in_request()
-            user_id = get_jwt_identity()
+            user_id = int(get_jwt_identity())
             user    = User.query.get(user_id)
             if not user or not user.is_active:
                 return jsonify({"error": "Usuario no encontrado o inactivo"}), 403
