@@ -52,6 +52,15 @@ def deactivate_user(user_id):
     db.session.commit()
     return jsonify({"message": "Usuario desactivado"}), 200
 
+@users_bp.route("/<int:user_id>/activate", methods=["PUT"])
+@jwt_required()
+@role_required("admin")
+def activate_user(user_id):
+    user = User.query.get_or_404(user_id)
+    user.is_active = True
+    db.session.commit()
+    return jsonify({"message": "Usuario activado"}), 200
+
 @users_bp.route("/audit-logs", methods=["GET"])
 @jwt_required()
 @role_required("admin")

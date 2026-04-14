@@ -18,6 +18,7 @@ def log_action(user_id, action, resource=None, details=None):
 @auth_bp.route("/register", methods=["POST"])
 def register():
     data = request.get_json()
+    print("DATA RECIBIDA:", data)
     required = ["username", "email", "password"]
     if not all(k in data for k in required):
         return jsonify({"error": "Campos requeridos: username, email, password"}), 400
